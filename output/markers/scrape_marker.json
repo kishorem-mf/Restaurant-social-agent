@@ -1,0 +1,12 @@
+{
+  "last_processed_index": 808,
+  "last_processed_name": "MISSION COMMUNITY MARKET",
+  "last_session_timestamp": "2026-01-14T19:34:00",
+  "total_processed": 808,
+  "total_found": 136,
+  "total_not_found": 462,
+  "total_empty": 19,
+  "total_wrong": 11,
+  "batch_size": 100,
+  "source_file": "data-1767987167575.csv"
+}

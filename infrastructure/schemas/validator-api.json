@@ -1,0 +1,72 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Response Validator API",
+    "version": "2.0.0",
+    "description": "Validates LLM responses against query evidence using INDEPENDENT verification. The validator re-executes the SQL query to get actual data - never trusts data passed by the agent."
+  },
+  "paths": {
+    "/validate_response": {
+      "get": {
+        "operationId": "validate_response",
+        "summary": "Validate response against actual query evidence",
+        "description": "Validates response by INDEPENDENTLY re-executing the SQL query to get actual data. Compares claims in the response against real query results. Returns action: PASS (grounded), SANITIZE (some claims removed), or BLOCK (critical fabrications detected).",
+        "parameters": [
+          {
+            "name": "response_text",
+            "in": "query",
+            "description": "The LLM-generated response text to validate. Must be your draft response before presenting to user.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sql_executed",
+            "in": "query",
+            "description": "The exact SQL query that was executed by execute_sql. The validator will re-run this query independently to verify claims.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation result with verified response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["PASS", "SANITIZE", "BLOCK"],
+                      "description": "PASS: Response is fully grounded. SANITIZE: Unverified claims removed. BLOCK: Critical fabrications detected."
+                    },
+                    "validated_response": {
+                      "type": "string",
+                      "description": "The validated response text. Use this instead of your original draft."
+                    },
+                    "confidence_score": {
+                      "type": "number",
+                      "description": "0.0-1.0 grounding score based on claim verification"
+                    },
+                    "violations_count": {
+                      "type": "integer",
+                      "description": "Number of fabricated or unverified claims detected"
+                    },
+                    "details": {
+                      "type": "object",
+                      "description": "Detailed verification results including actual_row_count and invalid_claims"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

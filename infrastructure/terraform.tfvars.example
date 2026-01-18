@@ -1,0 +1,12 @@
+# Terraform Variables Example
+# Copy this file to terraform.tfvars and update values
+
+aws_region  = "us-east-1"
+environment = "prod"
+
+# After creating the DuckDB Lambda layer, set this ARN:
+# aws lambda publish-layer-version --layer-name duckdb-python311 \
+#   --zip-file fileb://lambdas/layers/duckdb/duckdb-layer.zip \
+#   --compatible-runtimes python3.11 \
+#   --compatible-architectures x86_64
+duckdb_layer_arn = "arn:aws:lambda:us-east-1:ACCOUNT_ID:layer:duckdb-python311:1"

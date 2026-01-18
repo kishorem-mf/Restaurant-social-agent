@@ -1,0 +1,4 @@
+# Lambda dependencies
+# Note: duckdb is provided via Lambda Layer
+
+boto3>=1.28.0

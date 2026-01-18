@@ -1,0 +1,17 @@
+{
+  "current_search_term_index": 7,
+  "last_session_timestamp": "2026-01-16T18:49:00",
+  "total_posts_scraped": 317,
+  "posts_per_term": 20,
+  "search_terms": [
+    "nycrestaurants","californiacuisine","newyorkfood","nycfoodie",
+    "newyorkeats",
+    "nycrestaurants","newyorkstyle",
+    "californiadreaming","californiafoodie","calilife",
+    "calivibes","caliiforniaeats",
+    "newyorkfood"
+  ],
+  "completed_full_cycle": false,
+  "cycles_completed": 1,
+  "notes": "newyorkstyle session - extracted 20 posts successfully"
+}

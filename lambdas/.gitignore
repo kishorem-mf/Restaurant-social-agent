@@ -1,0 +1,15 @@
+# Lambda build artifacts
+*.zip
+layers/duckdb/python/
+layers/duckdb/duckdb-layer.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# Virtual environments
+venv/
+ENV/

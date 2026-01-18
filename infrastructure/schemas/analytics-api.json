@@ -1,0 +1,117 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Instagram Analytics SQL API",
+    "version": "2.1.0",
+    "description": "Execute SQL queries on Instagram analytics data with evidence tracking for anti-hallucination support"
+  },
+  "paths": {
+    "/execute_sql": {
+      "get": {
+        "operationId": "execute_sql",
+        "summary": "Execute SQL query on Instagram analytics data",
+        "description": "Execute a DuckDB SQL SELECT query on posts and restaurants tables. Returns evidence_metadata to determine if factual claims can be made. Available tables: posts (search_term, post_id, creator, posted_date, likes INT, comments INT, hashtags, caption, image_description, post_url, status), restaurants (restaurant_name, city, zip_code, phone, instagram_handle, followers INT, posts_count INT, bio, website, status). Only SELECT queries allowed. Results limited to 1000 rows.",
+        "parameters": [
+          {
+            "name": "sql",
+            "in": "query",
+            "description": "Valid DuckDB SELECT query. Example: SELECT restaurant_name, followers FROM restaurants WHERE city = 'NEW YORK' ORDER BY followers DESC LIMIT 10",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Query results with evidence metadata for anti-hallucination support",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the query executed successfully"
+                    },
+                    "row_count": {
+                      "type": "integer",
+                      "description": "Number of rows returned"
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Column names in the result"
+                    },
+                    "markdown_table": {
+                      "type": "string",
+                      "description": "Pre-formatted markdown table of results"
+                    },
+                    "data": {
+                      "type": "array",
+                      "description": "Raw query results as array of objects"
+                    },
+                    "sql_executed": {
+                      "type": "string",
+                      "description": "The sanitized SQL that was executed"
+                    },
+                    "evidence_metadata": {
+                      "type": "object",
+                      "description": "Metadata for determining if factual claims can be made",
+                      "properties": {
+                        "posts_retrieved": {
+                          "type": "boolean",
+                          "description": "True if posts were retrieved from the query"
+                        },
+                        "post_ids": {
+                          "type": "array",
+                          "items": { "type": "string" },
+                          "description": "List of post IDs in results (max 20) for citation"
+                        },
+                        "evidence_level": {
+                          "type": "string",
+                          "enum": ["none", "partial", "sufficient"],
+                          "description": "none=0 rows, partial=1-5 rows, sufficient=>5 rows"
+                        },
+                        "query_scope": {
+                          "type": "string",
+                          "enum": ["posts", "restaurants", "posts_and_restaurants", "unknown"],
+                          "description": "Which tables were queried"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_schema": {
+      "get": {
+        "operationId": "get_schema",
+        "summary": "Get database schema description",
+        "description": "Returns a description of available tables and their columns. Use this to understand what data is available before writing queries.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Schema description",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
