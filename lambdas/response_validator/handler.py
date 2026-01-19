@@ -84,6 +84,7 @@ class ExtractedClaims:
     """Claims extracted from LLM response."""
     post_ids: list
     creators: list
+    restaurant_names: list  # Restaurant names mentioned
     metrics: list  # (value, context) tuples
     rankings: list  # "top", "best", etc. claims
 
@@ -251,12 +252,41 @@ def determine_query_scope(sql: str) -> str:
         return "unknown"
 
 
+def extract_restaurant_handles_from_data(data: list, columns: list) -> list:
+    """Extract restaurant Instagram handles from query results."""
+    if not data or not columns:
+        return []
+
+    columns_lower = [c.lower() for c in columns]
+    if 'instagram_handle' not in columns_lower:
+        return []
+
+    handles = [row.get('instagram_handle') for row in data if row.get('instagram_handle')]
+    return handles[:20]
+
+
+def extract_restaurant_names_from_data(data: list, columns: list) -> list:
+    """Extract restaurant names from query results."""
+    if not data or not columns:
+        return []
+
+    columns_lower = [c.lower() for c in columns]
+    if 'restaurant_name' not in columns_lower:
+        return []
+
+    names = [row.get('restaurant_name') for row in data if row.get('restaurant_name')]
+    return names[:20]
+
+
 def build_evidence_metadata(query_result: QueryResult, sql: str) -> dict:
     """Build evidence metadata from actual query results."""
     if not query_result.success:
         return {
             'posts_retrieved': False,
             'post_ids': [],
+            'restaurants_retrieved': False,
+            'restaurant_handles': [],
+            'restaurant_names': [],
             'evidence_level': 'none',
             'query_scope': 'unknown'
         }
@@ -264,174 +294,72 @@ def build_evidence_metadata(query_result: QueryResult, sql: str) -> dict:
     query_scope = determine_query_scope(sql)
     evidence_level = calculate_evidence_level(query_result.row_count)
     post_ids = extract_post_ids_from_data(query_result.data, query_result.columns)
+    restaurant_handles = extract_restaurant_handles_from_data(query_result.data, query_result.columns)
+    restaurant_names = extract_restaurant_names_from_data(query_result.data, query_result.columns)
 
     posts_retrieved = (
         query_result.row_count > 0 and
-        query_scope in ['posts', 'posts_and_restaurants']
+        query_scope in ['posts', 'posts_and_restaurants'] and
+        len(post_ids) > 0
+    )
+
+    restaurants_retrieved = (
+        query_result.row_count > 0 and
+        query_scope in ['restaurants', 'posts_and_restaurants'] and
+        len(restaurant_handles) > 0
     )
 
     return {
         'posts_retrieved': posts_retrieved,
         'post_ids': post_ids,
+        'restaurants_retrieved': restaurants_retrieved,
+        'restaurant_handles': restaurant_handles,
+        'restaurant_names': restaurant_names,
         'evidence_level': evidence_level,
         'query_scope': query_scope
     }
 
 
 # =============================================================================
-# VALIDATION APPROACH: Direct Data Comparison
+# CLAIM EXTRACTION
 # =============================================================================
-#
-# Instead of trying to extract claims from free text (error-prone regex),
-# we compare the response against actual data:
-#
-# 1. Build a set of ACTUAL values from query results (post_ids, creators, metrics)
-# 2. Check if response contains a markdown table with data
-# 3. If table contains specific identifiers NOT in actual data = fabrication
-# 4. General text without specific claims = allowed
-#
-# This is more robust because we validate against known data, not guessed patterns.
 
-
-def build_actual_data_fingerprint(data: list, columns: list) -> dict:
+def extract_post_ids(text: str) -> list:
     """
-    Build a fingerprint of actual data from query results.
-    Returns dict with sets of actual values by type.
+    Extract post IDs mentioned in the response.
+    Matches patterns like: post_id, POST123, C1234567890, etc.
+
+    NOTE: Instagram post IDs typically start with 'C' followed by alphanumeric chars.
+    We avoid matching Instagram handles (which follow @) or common words.
     """
-    fingerprint = {
-        'post_ids': set(),
-        'creators': set(),
-        'restaurants': set(),
-        'metrics': set(),  # Store as strings for comparison
-        'all_values': set(),  # All string values for general matching
-    }
+    # First, extract all @handles to exclude them from post ID matching
+    handles = set(re.findall(r'@([a-zA-Z0-9_\.]+)', text, re.IGNORECASE))
 
-    if not data:
-        return fingerprint
+    patterns = [
+        r'\bpost[_\s]?id[:\s]+([^\s,]+)',  # "post_id: XXX"
+        r'\b(POST\d+)\b',  # POST123
+        r'\b([A-Z]{2,3}\d{3,})\b',  # MED001, NYC123, etc.
+        r'\b(C[a-zA-Z0-9_-]{10,})\b',  # Instagram-style IDs (start with C)
+    ]
 
-    for row in data:
-        for key, value in row.items():
-            if value is None:
-                continue
+    post_ids = []
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            # Exclude if it's a known handle
+            if match.lower() not in {h.lower() for h in handles}:
+                post_ids.append(match)
 
-            str_val = str(value).strip()
-            if not str_val:
-                continue
-
-            # Categorize by column name
-            key_lower = key.lower()
-
-            if key_lower == 'post_id':
-                fingerprint['post_ids'].add(str_val)
-            elif key_lower in ('creator', 'instagram_handle'):
-                fingerprint['creators'].add(str_val.lower().replace('@', ''))
-            elif key_lower == 'restaurant_name':
-                fingerprint['restaurants'].add(str_val.lower())
-            elif key_lower in ('likes', 'comments', 'followers', 'posts_count'):
-                fingerprint['metrics'].add(str_val)
-                # Also add formatted versions
-                if isinstance(value, (int, float)) and value >= 1000:
-                    if value >= 1_000_000:
-                        fingerprint['metrics'].add(f"{value/1_000_000:.1f}M")
-                        fingerprint['metrics'].add(f"{int(value/1_000_000)}M")
-                    elif value >= 1_000:
-                        fingerprint['metrics'].add(f"{value/1_000:.1f}K")
-                        fingerprint['metrics'].add(f"{int(value/1_000)}K")
-                    # Add comma-formatted
-                    fingerprint['metrics'].add(f"{value:,}")
-
-            # Add to general values
-            fingerprint['all_values'].add(str_val.lower())
-
-    return fingerprint
+    return list(set(post_ids))
 
 
-def extract_table_rows(text: str) -> list:
+def extract_creators(text: str) -> list:
     """
-    Extract data rows from markdown tables in response.
-    Returns list of row strings (excluding headers/separators).
+    Extract creator/username mentions from the response.
+    Matches @username patterns.
     """
-    rows = []
-    lines = text.split('\n')
-
-    in_table = False
-    for line in lines:
-        line = line.strip()
-        if not line:
-            in_table = False
-            continue
-
-        # Check if this looks like a table row
-        if '|' in line and line.count('|') >= 2:
-            # Skip separator rows
-            if re.match(r'^[\|\s\-:]+$', line):
-                in_table = True
-                continue
-
-            # Skip likely header rows (first row after start)
-            cells = [c.strip() for c in line.split('|') if c.strip()]
-            header_keywords = {'rank', 'post', 'creator', 'caption', 'likes', 'comments',
-                              'hashtag', 'restaurant', 'handle', 'followers', 'id', 'date'}
-            if all(c.lower() in header_keywords or c.isdigit() or c == '#' for c in cells[:3] if c):
-                in_table = True
-                continue
-
-            if in_table or line.startswith('|'):
-                rows.append(line)
-                in_table = True
-
-    return rows
-
-
-def validate_table_against_data(table_rows: list, fingerprint: dict) -> dict:
-    """
-    Check if table rows contain fabricated data.
-    Returns dict with fabrication details.
-    """
-    fabrications = {
-        'fabricated_rows': [],
-        'unverified_values': [],
-        'severity': 'NONE'
-    }
-
-    if not table_rows:
-        return fabrications
-
-    for row in table_rows:
-        cells = [c.strip() for c in row.split('|') if c.strip()]
-
-        for cell in cells:
-            # Skip empty or very short cells
-            if len(cell) < 3:
-                continue
-
-            # Skip numeric-only cells (could be rank numbers)
-            if cell.isdigit() and len(cell) <= 2:
-                continue
-
-            # Check if this looks like a specific identifier that should be in data
-            cell_lower = cell.lower()
-
-            # Check post IDs (alphanumeric, 10+ chars)
-            if re.match(r'^[A-Za-z0-9_-]{10,}$', cell):
-                if cell not in fingerprint['post_ids']:
-                    fabrications['unverified_values'].append(('post_id', cell))
-
-            # Check if cell looks like a username (lowercase, no spaces)
-            elif re.match(r'^[a-z][a-z0-9_\.]{2,20}$', cell_lower) and ' ' not in cell:
-                if cell_lower not in fingerprint['creators'] and cell_lower not in fingerprint['restaurants']:
-                    # Could be a username - check if it's a known pattern
-                    if not any(word in cell_lower for word in ['the', 'and', 'for', 'with']):
-                        fabrications['unverified_values'].append(('creator', cell))
-
-    # Determine severity
-    num_fabrications = len(fabrications['unverified_values'])
-    if num_fabrications >= 3:
-        fabrications['severity'] = 'HIGH'
-    elif num_fabrications >= 1:
-        fabrications['severity'] = 'MEDIUM'
-
-    return fabrications
+    pattern = r'@([a-zA-Z0-9_\.]+)'
+    return list(set(re.findall(pattern, text)))
 
 
 def extract_metrics(text: str) -> list:
@@ -475,11 +403,67 @@ def extract_rankings(text: str) -> list:
     return rankings
 
 
+def extract_restaurant_names_from_text(text: str) -> list:
+    """
+    Extract restaurant names from response text.
+    Look for names in table rows (first column only), bold text, and common patterns.
+    """
+    names = []
+
+    # Common non-restaurant terms to filter out
+    non_names = {
+        'rank', 'restaurant', 'name', 'handle', 'followers', 'posts',
+        'city', 'likes', 'comments', 'date', '---', '------',
+        # Common city names that might appear in tables
+        'new york', 'los angeles', 'chicago', 'houston', 'phoenix',
+        'philadelphia', 'san antonio', 'san diego', 'dallas', 'san jose',
+        'austin', 'jacksonville', 'san francisco', 'columbus', 'charlotte',
+        'fort worth', 'indianapolis', 'seattle', 'denver', 'washington',
+        'boston', 'el paso', 'nashville', 'detroit', 'oklahoma city',
+        'portland', 'las vegas', 'memphis', 'louisville', 'baltimore',
+        'milwaukee', 'albuquerque', 'tucson', 'fresno', 'mesa', 'sacramento',
+        'atlanta', 'kansas city', 'colorado springs', 'miami', 'raleigh',
+        'omaha', 'long beach', 'virginia beach', 'oakland', 'minneapolis',
+        'tulsa', 'arlington', 'tampa', 'new orleans', 'queens', 'brooklyn',
+        'manhattan', 'staten island', 'bronx',
+    }
+
+    # Pattern 1: Extract first column from markdown table rows only
+    # Match rows like: | STARBUCKS | @handle | 17.7M | ... |
+    table_rows = re.findall(r'^\|([^|]+)\|', text, re.MULTILINE)
+    for match in table_rows:
+        name = match.strip()
+        if name and name.lower() not in non_names and not name.startswith('-'):
+            # Skip if it looks like a number or metric
+            if not re.match(r'^[\d.,]+[KMB]?$', name, re.IGNORECASE):
+                names.append(name)
+
+    # Pattern 2: Bold restaurant names (**Name**)
+    bold_pattern = r'\*\*([A-Z][A-Za-z\s\'\-&0-9]+?)\*\*'
+    bold_matches = re.findall(bold_pattern, text)
+    for m in bold_matches:
+        name = m.strip()
+        if len(name) > 2 and name.lower() not in non_names:
+            names.append(name)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_names = []
+    for name in names:
+        normalized = name.upper().strip()
+        if normalized not in seen and len(normalized) > 2:
+            seen.add(normalized)
+            unique_names.append(name)
+
+    return unique_names[:20]
+
+
 def extract_claims(response_text: str) -> ExtractedClaims:
     """Extract all factual claims from LLM response."""
     return ExtractedClaims(
         post_ids=extract_post_ids(response_text),
         creators=extract_creators(response_text),
+        restaurant_names=extract_restaurant_names_from_text(response_text),
         metrics=extract_metrics(response_text),
         rankings=extract_rankings(response_text)
     )
@@ -534,6 +518,30 @@ def validate_creators(claimed_creators: list, evidence_data: list) -> tuple:
             valid.append(creator)
         else:
             invalid.append(creator)
+
+    return valid, invalid
+
+
+def validate_restaurant_names(claimed_names: list, evidence_names: list) -> tuple:
+    """
+    Validate claimed restaurant names against evidence.
+    Returns (valid_names, invalid_names).
+    """
+    # Normalize evidence names for comparison
+    evidence_normalized = {name.upper().strip() for name in evidence_names if name}
+
+    valid = []
+    invalid = []
+
+    for claimed_name in claimed_names:
+        claimed_normalized = claimed_name.upper().strip()
+        # Check for exact match or partial match
+        if claimed_normalized in evidence_normalized:
+            valid.append(claimed_name)
+        elif any(claimed_normalized in ev or ev in claimed_normalized for ev in evidence_normalized):
+            valid.append(claimed_name)  # Partial match (e.g., "LUKE'S LOBSTER" vs "LUKE S LOBSTER")
+        else:
+            invalid.append(claimed_name)
 
     return valid, invalid
 
@@ -624,24 +632,173 @@ def sanitize_response(response_text: str, invalid_claims: dict) -> str:
 # MAIN VALIDATION LOGIC
 # =============================================================================
 
-def validate_response(
+def validate_response_with_allowed_values(
     response_text: str,
-    sql_executed: str
+    allowed_values: dict
 ) -> ValidationResult:
     """
-    Main validation function with INDEPENDENT verification.
+    Simplified validation using pre-computed allowed_values.
 
-    This function does NOT trust any data passed by the agent.
-    It re-executes the SQL query to get actual evidence.
+    This is the preferred validation method - uses simple lookup instead
+    of re-executing SQL queries.
 
     Args:
         response_text: LLM-generated response to validate
-        sql_executed: The SQL query that was executed (will be re-run for verification)
+        allowed_values: Dict with 'handles', 'post_ids', 'restaurant_names', 'creators'
 
     Returns:
         ValidationResult with action (PASS/SANITIZE/BLOCK) and details
     """
-    logger.info("Starting independent response validation")
+    logger.info("Starting simplified validation with allowed_values")
+
+    # Extract allowed lists (normalize for comparison)
+    allowed_handles = {h.lower().replace('@', '') for h in allowed_values.get('handles', [])}
+    allowed_post_ids = {str(pid).upper() for pid in allowed_values.get('post_ids', [])}
+    allowed_names = {n.upper().strip() for n in allowed_values.get('restaurant_names', [])}
+    allowed_creators = {c.lower().replace('@', '') for c in allowed_values.get('creators', [])}
+
+    # Combine handles and creators for @ mention validation
+    all_allowed_handles = allowed_handles | allowed_creators
+
+    logger.info(f"Allowed values: {len(allowed_handles)} handles, {len(allowed_post_ids)} post_ids, "
+                f"{len(allowed_names)} names, {len(allowed_creators)} creators")
+
+    # Extract claims from response
+    claims = extract_claims(response_text)
+    logger.info(f"Extracted claims: {len(claims.post_ids)} post_ids, "
+                f"{len(claims.creators)} creators, {len(claims.restaurant_names)} names")
+
+    violations = []
+    invalid_claims = {}
+
+    # Validate @ mentions (handles/creators)
+    if claims.creators:
+        invalid_creators = []
+        for creator in claims.creators:
+            normalized = creator.lower().replace('@', '')
+            if normalized not in all_allowed_handles:
+                invalid_creators.append(creator)
+
+        if invalid_creators:
+            violations.append({
+                'type': 'invalid_handles',
+                'severity': 'HIGH',
+                'claimed': invalid_creators,
+                'allowed_sample': list(all_allowed_handles)[:5],
+                'message': f"Handles not in allowed list: {invalid_creators}"
+            })
+            invalid_claims['creators'] = invalid_creators
+            logger.warning(f"HALLUCINATION: Invalid handles {invalid_creators}")
+
+    # Validate post IDs
+    if claims.post_ids:
+        invalid_ids = []
+        for pid in claims.post_ids:
+            if str(pid).upper() not in allowed_post_ids:
+                invalid_ids.append(pid)
+
+        if invalid_ids:
+            violations.append({
+                'type': 'invalid_post_ids',
+                'severity': 'HIGH',
+                'claimed': invalid_ids,
+                'allowed_sample': list(allowed_post_ids)[:5],
+                'message': f"Post IDs not in allowed list: {invalid_ids}"
+            })
+            invalid_claims['post_ids'] = invalid_ids
+            logger.warning(f"HALLUCINATION: Invalid post IDs {invalid_ids}")
+
+    # Validate restaurant names
+    if claims.restaurant_names and allowed_names:
+        invalid_names = []
+        for name in claims.restaurant_names:
+            normalized = name.upper().strip()
+            # Check exact match or partial match
+            if normalized not in allowed_names:
+                # Check for partial match (e.g., "STARBUCKS" in "STARBUCKS COFFEE")
+                if not any(normalized in an or an in normalized for an in allowed_names):
+                    invalid_names.append(name)
+
+        if invalid_names:
+            violations.append({
+                'type': 'invalid_restaurant_names',
+                'severity': 'HIGH',
+                'claimed': invalid_names,
+                'allowed_sample': list(allowed_names)[:5],
+                'message': f"Restaurant names not in allowed list: {invalid_names}"
+            })
+            invalid_claims['restaurant_names'] = invalid_names
+            logger.warning(f"HALLUCINATION: Invalid names {invalid_names}")
+
+    # Calculate confidence score
+    total_claims = len(claims.post_ids) + len(claims.creators) + len(claims.restaurant_names)
+    total_violations = (len(invalid_claims.get('post_ids', [])) +
+                       len(invalid_claims.get('creators', [])) +
+                       len(invalid_claims.get('restaurant_names', [])))
+
+    if total_claims > 0:
+        confidence_score = 1.0 - (total_violations / total_claims)
+    else:
+        confidence_score = 1.0
+
+    # Determine action
+    high_severity = sum(1 for v in violations if v['severity'] == 'HIGH')
+
+    if high_severity >= 2:
+        action = 'BLOCK'
+        validated_response = (
+            "I apologize, but I found references that don't match the actual data. "
+            "Please let me provide only verified information from the query results."
+        )
+    elif violations:
+        action = 'SANITIZE'
+        validated_response = sanitize_response(response_text, invalid_claims)
+    else:
+        action = 'PASS'
+        validated_response = response_text
+
+    logger.info(f"Validation result: action={action}, confidence={confidence_score:.2f}")
+
+    return ValidationResult(
+        action=action,
+        original_response=response_text,
+        validated_response=validated_response,
+        violations=violations,
+        confidence_score=confidence_score,
+        details={
+            'claims_checked': total_claims,
+            'claims_invalid': total_violations,
+            'invalid_claims': invalid_claims,
+            'verification_method': 'allowed_values_lookup'
+        }
+    )
+
+
+def validate_response(
+    response_text: str,
+    sql_executed: str,
+    allowed_values: dict = None
+) -> ValidationResult:
+    """
+    Main validation function - uses allowed_values if provided, otherwise falls back
+    to independent SQL verification.
+
+    Args:
+        response_text: LLM-generated response to validate
+        sql_executed: The SQL query that was executed
+        allowed_values: Optional dict with allowed handles, post_ids, etc.
+
+    Returns:
+        ValidationResult with action (PASS/SANITIZE/BLOCK) and details
+    """
+    # PREFERRED: Use allowed_values for simple lookup validation
+    if allowed_values and (allowed_values.get('handles') or allowed_values.get('post_ids')
+                          or allowed_values.get('restaurant_names') or allowed_values.get('creators')):
+        logger.info("Using simplified allowed_values validation")
+        return validate_response_with_allowed_values(response_text, allowed_values)
+
+    # FALLBACK: Re-execute SQL for independent verification
+    logger.info("Falling back to SQL re-execution validation")
     logger.info(f"SQL to verify: {sql_executed[:200]}...")
 
     # STEP 1: Re-execute SQL to get ACTUAL data (independent verification)
@@ -714,6 +871,21 @@ def validate_response(
             })
             invalid_claims['creators'] = invalid_creators
 
+    # Validate restaurant names (NEW - anti-hallucination for restaurant queries)
+    evidence_restaurant_names = evidence_metadata.get('restaurant_names', [])
+    if claims.restaurant_names and evidence_metadata.get('query_scope') in ['restaurants', 'posts_and_restaurants']:
+        valid_names, invalid_names = validate_restaurant_names(claims.restaurant_names, evidence_restaurant_names)
+        if invalid_names:
+            violations.append({
+                'type': 'invalid_restaurant_names',
+                'severity': 'HIGH',
+                'claimed': invalid_names,
+                'actual_names': evidence_restaurant_names[:5],
+                'message': f"Restaurant names not found in actual data: {invalid_names}"
+            })
+            invalid_claims['restaurant_names'] = invalid_names
+            logger.warning(f"HALLUCINATION DETECTED: Claimed restaurants {invalid_names} not in evidence {evidence_restaurant_names[:5]}")
+
     # Validate metrics
     if claims.metrics:
         valid_metrics, invalid_metrics = validate_metrics(
@@ -745,9 +917,10 @@ def validate_response(
 
     # Calculate confidence score (1.0 = fully grounded, 0.0 = fully fabricated)
     total_claims = (len(claims.post_ids) + len(claims.creators) +
-                    len(claims.metrics) + len(claims.rankings))
+                    len(claims.restaurant_names) + len(claims.metrics) + len(claims.rankings))
     total_violations = len(invalid_claims.get('post_ids', [])) + \
                        len(invalid_claims.get('creators', [])) + \
+                       len(invalid_claims.get('restaurant_names', [])) + \
                        len(invalid_claims.get('metrics', []))
 
     if total_claims > 0:
@@ -864,7 +1037,8 @@ def handler(event: dict, context: Any) -> dict:
 
     Expects:
     - response_text: The LLM-generated response to validate
-    - sql_executed: The SQL query that was executed (will be re-run for independent verification)
+    - sql_executed: The SQL query that was executed
+    - allowed_values: (optional) JSON string with handles, post_ids, etc. for simplified validation
     """
     logger.info(f"Validation event received: {json.dumps(event)}")
 
@@ -873,6 +1047,17 @@ def handler(event: dict, context: Any) -> dict:
 
         response_text = params.get('response_text', '')
         sql_executed = params.get('sql_executed', '')
+
+        # Parse allowed_values if provided (comes as JSON string)
+        allowed_values_str = params.get('allowed_values', '')
+        allowed_values = None
+        if allowed_values_str:
+            try:
+                allowed_values = json.loads(allowed_values_str)
+                logger.info(f"Received allowed_values with {len(allowed_values.get('handles', []))} handles, "
+                           f"{len(allowed_values.get('post_ids', []))} post_ids")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse allowed_values: {e}")
 
         # Backwards compatibility: also check for old parameter names
         if not sql_executed:
@@ -887,25 +1072,25 @@ def handler(event: dict, context: Any) -> dict:
                 confidence_score=1.0,
                 details={'message': 'No response text to validate'}
             )
-        elif not sql_executed:
-            # If no SQL provided, we cannot verify - block the response
+        elif not sql_executed and not allowed_values:
+            # If no SQL and no allowed_values provided, we cannot verify - block the response
             result = ValidationResult(
                 action='BLOCK',
                 original_response=response_text,
                 validated_response=(
-                    "I cannot verify this response without the original query. "
-                    "Please provide the SQL query that generated this data."
+                    "I cannot verify this response without validation data. "
+                    "Please provide either SQL query or allowed_values."
                 ),
                 violations=[{
-                    'type': 'no_sql_provided',
+                    'type': 'no_validation_data',
                     'severity': 'HIGH',
-                    'message': 'No SQL query provided for verification'
+                    'message': 'Neither sql_executed nor allowed_values provided'
                 }],
                 confidence_score=0.0,
-                details={'message': 'sql_executed parameter is required'}
+                details={'message': 'sql_executed or allowed_values parameter is required'}
             )
         else:
-            result = validate_response(response_text, sql_executed)
+            result = validate_response(response_text, sql_executed, allowed_values)
 
         return format_bedrock_response(event, result)
 

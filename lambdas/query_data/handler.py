@@ -445,6 +445,29 @@ def extract_post_ids(data: list, columns: list) -> list:
     return post_ids[:20]  # Limit to first 20 for metadata
 
 
+def extract_restaurant_handles(data: list, columns: list) -> list:
+    """
+    Extract restaurant Instagram handles from query results for evidence tracking.
+
+    Args:
+        data: List of row dictionaries
+        columns: List of column names
+
+    Returns:
+        List of instagram_handle values (max 20 for metadata)
+    """
+    if not data or not columns:
+        return []
+
+    # Check if instagram_handle column exists
+    columns_lower = [c.lower() for c in columns]
+    if 'instagram_handle' not in columns_lower:
+        return []
+
+    handles = [row.get('instagram_handle') for row in data if row.get('instagram_handle')]
+    return handles[:20]  # Limit to first 20 for metadata
+
+
 def determine_query_scope(sql: str) -> str:
     """
     Determine the scope of the query based on tables referenced.
@@ -480,18 +503,20 @@ def build_evidence_metadata(result: 'QueryResult') -> dict:
     This metadata helps the agent determine:
     - Whether factual claims can be made
     - What level of confidence is appropriate
-    - Which posts can be cited as evidence
+    - Which posts/restaurants can be cited as evidence
 
     Args:
         result: QueryResult from query execution
 
     Returns:
-        Evidence metadata dictionary
+        Evidence metadata dictionary with entity IDs for validation
     """
     if not result.success:
         return {
             'posts_retrieved': False,
             'post_ids': [],
+            'restaurants_retrieved': False,
+            'restaurant_handles': [],
             'evidence_level': 'none',
             'query_scope': 'unknown'
         }
@@ -499,18 +524,88 @@ def build_evidence_metadata(result: 'QueryResult') -> dict:
     query_scope = determine_query_scope(result.sql)
     evidence_level = calculate_evidence_level(result.row_count)
     post_ids = extract_post_ids(result.data or [], result.columns or [])
+    restaurant_handles = extract_restaurant_handles(result.data or [], result.columns or [])
 
     # posts_retrieved is True only if we queried posts and got results
     posts_retrieved = (
         result.row_count > 0 and
-        query_scope in ['posts', 'posts_and_restaurants']
+        query_scope in ['posts', 'posts_and_restaurants'] and
+        len(post_ids) > 0
+    )
+
+    # restaurants_retrieved is True only if we queried restaurants and got results
+    restaurants_retrieved = (
+        result.row_count > 0 and
+        query_scope in ['restaurants', 'posts_and_restaurants'] and
+        len(restaurant_handles) > 0
     )
 
     return {
         'posts_retrieved': posts_retrieved,
         'post_ids': post_ids,
+        'restaurants_retrieved': restaurants_retrieved,
+        'restaurant_handles': restaurant_handles,
         'evidence_level': evidence_level,
         'query_scope': query_scope
+    }
+
+
+def build_allowed_values(result: 'QueryResult') -> dict:
+    """
+    Build allowed_values for simplified anti-hallucination validation.
+
+    This provides a simple list of valid values that the validator can
+    use for lookup-based verification without re-executing queries.
+
+    Args:
+        result: QueryResult from query execution
+
+    Returns:
+        Dictionary with 'handles' and 'post_ids' lists
+    """
+    if not result.success or not result.data:
+        return {
+            'handles': [],
+            'post_ids': [],
+            'restaurant_names': [],
+            'creators': []
+        }
+
+    handles = []
+    post_ids = []
+    restaurant_names = []
+    creators = []
+
+    for row in result.data:
+        # Extract Instagram handles
+        if 'instagram_handle' in row and row['instagram_handle']:
+            handle = row['instagram_handle']
+            # Normalize: ensure @ prefix
+            if not handle.startswith('@'):
+                handle = f"@{handle}"
+            handles.append(handle.lower())
+
+        # Extract post IDs
+        if 'post_id' in row and row['post_id']:
+            post_ids.append(str(row['post_id']))
+
+        # Extract restaurant names
+        if 'restaurant_name' in row and row['restaurant_name']:
+            restaurant_names.append(row['restaurant_name'])
+
+        # Extract creators (from posts table)
+        if 'creator' in row and row['creator']:
+            creator = row['creator']
+            if not creator.startswith('@'):
+                creator = f"@{creator}"
+            creators.append(creator.lower())
+
+    # Deduplicate while preserving order
+    return {
+        'handles': list(dict.fromkeys(handles)),
+        'post_ids': list(dict.fromkeys(post_ids)),
+        'restaurant_names': list(dict.fromkeys(restaurant_names)),
+        'creators': list(dict.fromkeys(creators))
     }
 
 
@@ -586,7 +681,7 @@ def extract_user_query(event: dict) -> str | None:
 
 
 def format_bedrock_response(event: dict, result: QueryResult) -> dict:
-    """Format response for Bedrock Agent with evidence metadata."""
+    """Format response for Bedrock Agent with evidence metadata and allowed_values."""
     action_group = event.get('actionGroup', '')
     function_name = event.get('function', 'execute_sql')
     api_path = event.get('apiPath', '/execute_sql')
@@ -594,6 +689,9 @@ def format_bedrock_response(event: dict, result: QueryResult) -> dict:
 
     # Build evidence metadata for anti-hallucination support
     evidence_metadata = build_evidence_metadata(result)
+
+    # Build allowed_values for simplified validation (handles and post_ids only)
+    allowed_values = build_allowed_values(result)
 
     if result.success:
         # Generate pre-formatted markdown table
@@ -606,14 +704,16 @@ def format_bedrock_response(event: dict, result: QueryResult) -> dict:
             'markdown_table': markdown_table,
             'data': result.data,
             'sql_executed': result.sql,
-            'evidence_metadata': evidence_metadata
+            'evidence_metadata': evidence_metadata,
+            'allowed_values': allowed_values
         }
     else:
         response_body = {
             'success': False,
             'error': result.error,
             'sql_attempted': result.sql,
-            'evidence_metadata': evidence_metadata
+            'evidence_metadata': evidence_metadata,
+            'allowed_values': allowed_values
         }
 
     return {

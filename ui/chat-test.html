@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Analytics Chat (Test UI)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar */
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+
+        /* Markdown table styles */
+        .message-content table {
+            border-collapse: collapse;
+            margin: 0.5rem 0;
+            font-size: 0.875rem;
+            width: 100%;
+        }
+        .message-content th, .message-content td {
+            border: 1px solid #d1d5db;
+            padding: 0.5rem;
+            text-align: left;
+        }
+        .message-content th {
+            background-color: #f3f4f6;
+            font-weight: 600;
+        }
+        .message-content tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        /* Loading animation */
+        .typing-indicator span {
+            animation: typing 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-4px);
+            }
+        }
+
+        /* Code block styling */
+        .message-content pre {
+            background-color: #1f2937;
+            color: #e5e7eb;
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+        }
+        .message-content code {
+            background-color: #e5e7eb;
+            padding: 0.125rem 0.25rem;
+            border-radius: 0.25rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875em;
+        }
+        .message-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto max-w-4xl p-4 h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-white rounded-t-lg border-b px-6 py-4 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-semibold text-gray-800">Instagram Analytics Chat</h1>
+                    <p class="text-sm text-gray-500">Test UI - Phase 1</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="connectionStatus" class="flex items-center gap-1.5 text-sm">
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                        <span class="text-gray-600">Live API</span>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Chat Messages Container -->
+        <div id="chatContainer" class="chat-container flex-1 bg-white overflow-y-auto p-4 space-y-4">
+            <!-- Welcome message -->
+            <div class="flex justify-start">
+                <div class="max-w-3xl">
+                    <div class="bg-gray-100 rounded-lg px-4 py-3 text-gray-700">
+                        <p class="font-medium mb-2">Welcome to Instagram Analytics!</p>
+                        <p class="text-sm">I can help you analyze Instagram posts and restaurant data. Try asking:</p>
+                        <ul class="text-sm mt-2 space-y-1 list-disc list-inside text-gray-600">
+                            <li>Show me top 5 restaurants by followers</li>
+                            <li>What are the most engaging posts this week?</li>
+                            <li>Find restaurants with outdoor seating</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metadata Panel (collapsible) -->
+        <div id="metadataPanel" class="bg-gray-50 border-t border-gray-200 hidden">
+            <button id="toggleMetadata" class="w-full px-4 py-2 text-left text-sm font-medium text-gray-600 hover:bg-gray-100 flex items-center gap-2">
+                <svg id="metadataChevron" class="w-4 h-4 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+                <span>Response Metadata</span>
+            </button>
+            <div id="metadataContent" class="px-4 pb-3 hidden">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div class="bg-white rounded p-2 border">
+                        <span class="text-gray-500 block text-xs">Tools Used</span>
+                        <span id="metaTools" class="font-medium text-gray-800">-</span>
+                    </div>
+                    <div class="bg-white rounded p-2 border">
+                        <span class="text-gray-500 block text-xs">Confidence</span>
+                        <span id="metaConfidence" class="font-medium text-gray-800">-</span>
+                    </div>
+                    <div class="bg-white rounded p-2 border">
+                        <span class="text-gray-500 block text-xs">Validation</span>
+                        <span id="metaValidation" class="font-medium text-gray-800">-</span>
+                    </div>
+                    <div class="bg-white rounded p-2 border">
+                        <span class="text-gray-500 block text-xs">Response Time</span>
+                        <span id="metaTime" class="font-medium text-gray-800">-</span>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <span class="text-gray-500 text-xs block mb-1">SQL Executed</span>
+                    <pre id="metaSql" class="bg-gray-800 text-green-400 text-xs p-2 rounded overflow-x-auto">-</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="bg-white rounded-b-lg border-t px-4 py-3 shadow-sm">
+            <form id="chatForm" class="flex gap-3">
+                <input
+                    type="text"
+                    id="messageInput"
+                    placeholder="Type your message..."
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    autocomplete="off"
+                >
+                <button
+                    type="submit"
+                    id="sendButton"
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Send
+                </button>
+            </form>
+
+            <!-- Action Buttons -->
+            <div class="flex gap-2 mt-2">
+                <button
+                    id="clearButton"
+                    class="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                >
+                    Clear Chat
+                </button>
+                <button
+                    id="showJsonButton"
+                    class="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+                >
+                    Show Raw JSON
+                </button>
+                <div class="flex-1"></div>
+                <label class="flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" id="mockModeToggle" class="rounded">
+                    Mock Mode
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Raw JSON Modal -->
+    <div id="jsonModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between px-4 py-3 border-b">
+                <h3 class="font-semibold text-gray-800">Raw JSON Request/Response</h3>
+                <button id="closeJsonModal" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4">
+                <div class="space-y-4">
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-600 mb-1">Last Request</h4>
+                        <pre id="jsonRequest" class="bg-gray-800 text-green-400 text-xs p-3 rounded overflow-x-auto whitespace-pre-wrap">No request yet</pre>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-medium text-gray-600 mb-1">Last Response</h4>
+                        <pre id="jsonResponse" class="bg-gray-800 text-green-400 text-xs p-3 rounded overflow-x-auto whitespace-pre-wrap">No response yet</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============================================================================
+        // STATE
+        // =============================================================================
+        let conversationHistory = [];
+        let lastRequest = null;
+        let lastResponse = null;
+        let isMockMode = false;  // Default to LIVE API mode
+
+        // Configuration
+        const CONFIG = {
+            apiEndpoint: 'https://3lv4j7bzukqk74fohotelckqka0neuuz.lambda-url.us-east-1.on.aws/',  // Orchestrator Lambda Function URL
+            sessionId: generateSessionId()
+        };
+
+        // =============================================================================
+        // MOCK RESPONSES
+        // =============================================================================
+        const MOCK_RESPONSES = {
+            'top restaurants': {
+                response: `Here are the top 5 restaurants by followers:
+
+| Rank | Restaurant | Handle | Followers | Posts |
+|------|------------|--------|-----------|-------|
+| 1 | Cafe Roma | @caferoma | 45.2K | 234 |
+| 2 | The Garden Bistro | @gardenbistro | 38.7K | 187 |
+| 3 | Ocean View | @oceanviewdining | 32.1K | 156 |
+| 4 | Sunset Grill | @sunsetgrill | 28.5K | 203 |
+| 5 | Mountain Kitchen | @mountainkitchen | 24.8K | 145 |
+
+These restaurants have the highest Instagram following in our database.`,
+                metadata: {
+                    tools_used: ['query_data', 'response_validator'],
+                    sql_executed: 'SELECT restaurant_name, instagram_handle, followers, posts_count FROM restaurants ORDER BY followers DESC LIMIT 5',
+                    confidence: 0.95,
+                    validation_status: 'PASS'
+                }
+            },
+            'engaging posts': {
+                response: `Here are the most engaging posts this week:
+
+| Post | Creator | Likes | Comments | Engagement |
+|------|---------|-------|----------|------------|
+| "Amazing sunset dinner" | @caferoma | 2.3K | 156 | 4.2% |
+| "New menu alert!" | @gardenbistro | 1.9K | 203 | 5.1% |
+| "Brunch vibes" | @oceanviewdining | 1.7K | 98 | 3.8% |
+
+**Analysis**: Posts with food photography and natural lighting tend to perform best.`,
+                metadata: {
+                    tools_used: ['query_data', 'response_validator'],
+                    sql_executed: "SELECT caption, creator, likes, comments FROM posts WHERE posted_date >= CURRENT_DATE - INTERVAL '7 days' ORDER BY likes + comments DESC LIMIT 5",
+                    confidence: 0.92,
+                    validation_status: 'PASS'
+                }
+            },
+            'outdoor seating': {
+                response: `Based on my search, here are restaurants that mention outdoor seating in their profiles:
+
+| Restaurant | Bio Excerpt | Followers |
+|------------|-------------|-----------|
+| Garden Bistro | "Beautiful outdoor patio..." | 38.7K |
+| Ocean View | "Waterfront dining with terrace..." | 32.1K |
+| Sunset Grill | "Rooftop seating available..." | 28.5K |
+
+*Note: This search uses semantic matching from restaurant bios and descriptions.*`,
+                metadata: {
+                    tools_used: ['vector_search', 'response_validator'],
+                    sql_executed: null,
+                    confidence: 0.88,
+                    validation_status: 'PASS'
+                }
+            },
+            'default': {
+                response: `I understand you're asking about Instagram analytics. Let me help you with that.
+
+**Available queries include:**
+- Restaurant metrics (followers, posts, engagement)
+- Post analytics (likes, comments, hashtags)
+- Search restaurant profiles by description
+
+Could you please be more specific about what you'd like to know?`,
+                metadata: {
+                    tools_used: [],
+                    sql_executed: null,
+                    confidence: 0.7,
+                    validation_status: 'PASS'
+                }
+            }
+        };
+
+        // =============================================================================
+        // UTILITIES
+        // =============================================================================
+        function generateSessionId() {
+            return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function parseMarkdown(text) {
+            // Simple markdown parser
+            let html = escapeHtml(text);
+
+            // Tables
+            html = html.replace(/\|(.+)\|/g, (match, content) => {
+                if (content.match(/^[\s\-:]+$/)) {
+                    return ''; // Skip separator row (handled by table structure)
+                }
+                const cells = content.split('|').map(c => c.trim());
+                return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+            });
+
+            // Wrap consecutive table rows
+            html = html.replace(/(<tr>.*?<\/tr>\s*)+/gs, match => {
+                const rows = match.split('\n').filter(r => r.trim());
+                if (rows.length > 1) {
+                    // First row is header
+                    const header = rows[0].replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>');
+                    const body = rows.slice(1).join('\n');
+                    return `<table><thead>${header}</thead><tbody>${body}</tbody></table>`;
+                }
+                return match;
+            });
+
+            // Bold
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+            // Italic
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+            // Code blocks
+            html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+
+            // Inline code
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+            // Lists
+            html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+            html = html.replace(/(<li>.*<\/li>\s*)+/g, '<ul>$&</ul>');
+
+            // Line breaks
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = html.replace(/\n/g, '<br>');
+
+            return `<p>${html}</p>`;
+        }
+
+        // =============================================================================
+        // UI FUNCTIONS
+        // =============================================================================
+        function addMessage(content, isUser, metadata = null) {
+            const container = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            const bubbleClass = isUser
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-700';
+
+            messageDiv.innerHTML = `
+                <div class="max-w-3xl">
+                    <div class="${bubbleClass} rounded-lg px-4 py-3 message-content">
+                        ${isUser ? escapeHtml(content) : parseMarkdown(content)}
+                    </div>
+                    ${!isUser && metadata ? `
+                        <div class="flex gap-2 mt-1 text-xs text-gray-500">
+                            ${metadata.tools_used?.length ? `<span>Tools: ${metadata.tools_used.join(', ')}</span>` : ''}
+                            ${metadata.confidence ? `<span>Confidence: ${(metadata.confidence * 100).toFixed(0)}%</span>` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+
+            // Update metadata panel if assistant message
+            if (!isUser && metadata) {
+                updateMetadataPanel(metadata);
+            }
+        }
+
+        function addTypingIndicator() {
+            const container = document.getElementById('chatContainer');
+            const indicator = document.createElement('div');
+            indicator.id = 'typingIndicator';
+            indicator.className = 'flex justify-start';
+            indicator.innerHTML = `
+                <div class="bg-gray-100 rounded-lg px-4 py-3">
+                    <div class="typing-indicator flex gap-1">
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                    </div>
+                </div>
+            `;
+            container.appendChild(indicator);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typingIndicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        function updateMetadataPanel(metadata) {
+            const panel = document.getElementById('metadataPanel');
+            panel.classList.remove('hidden');
+
+            document.getElementById('metaTools').textContent =
+                metadata.tools_used?.join(', ') || '-';
+            document.getElementById('metaConfidence').textContent =
+                metadata.confidence ? `${(metadata.confidence * 100).toFixed(0)}%` : '-';
+            document.getElementById('metaValidation').textContent =
+                metadata.validation_status || '-';
+            document.getElementById('metaTime').textContent =
+                metadata.response_time ? `${metadata.response_time}ms` : '-';
+            document.getElementById('metaSql').textContent =
+                metadata.sql_executed || 'No SQL executed';
+        }
+
+        function clearChat() {
+            const container = document.getElementById('chatContainer');
+            container.innerHTML = '';
+            conversationHistory = [];
+            lastRequest = null;
+            lastResponse = null;
+
+            // Add welcome message back
+            addMessage(`Welcome to Instagram Analytics!
+
+I can help you analyze Instagram posts and restaurant data. Try asking:
+- Show me top 5 restaurants by followers
+- What are the most engaging posts this week?
+- Find restaurants with outdoor seating`, false);
+
+            // Hide metadata panel
+            document.getElementById('metadataPanel').classList.add('hidden');
+
+            // Save to localStorage
+            localStorage.removeItem('chatHistory');
+        }
+
+        // =============================================================================
+        // API FUNCTIONS
+        // =============================================================================
+        async function getMockResponse(message) {
+            // Simulate API delay
+            await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 500));
+
+            const lowerMessage = message.toLowerCase();
+
+            // Find matching mock response
+            if (lowerMessage.includes('top') && lowerMessage.includes('restaurant')) {
+                return MOCK_RESPONSES['top restaurants'];
+            } else if (lowerMessage.includes('engag') || lowerMessage.includes('popular') || lowerMessage.includes('post')) {
+                return MOCK_RESPONSES['engaging posts'];
+            } else if (lowerMessage.includes('outdoor') || lowerMessage.includes('seating') || lowerMessage.includes('patio')) {
+                return MOCK_RESPONSES['outdoor seating'];
+            } else {
+                return MOCK_RESPONSES['default'];
+            }
+        }
+
+        async function sendMessage(message) {
+            const startTime = Date.now();
+
+            // Build request
+            const request = {
+                message: message,
+                conversation_history: conversationHistory.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                session_id: CONFIG.sessionId
+            };
+
+            lastRequest = request;
+
+            if (isMockMode) {
+                // Mock mode
+                const mockResult = await getMockResponse(message);
+                const responseTime = Date.now() - startTime;
+
+                lastResponse = {
+                    response: mockResult.response,
+                    metadata: {
+                        ...mockResult.metadata,
+                        response_time: responseTime
+                    }
+                };
+
+                return lastResponse;
+            } else {
+                // Real API call
+                try {
+                    const response = await fetch(CONFIG.apiEndpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(request)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const responseTime = Date.now() - startTime;
+
+                    lastResponse = {
+                        ...data,
+                        metadata: {
+                            ...data.metadata,
+                            response_time: responseTime
+                        }
+                    };
+
+                    return lastResponse;
+                } catch (error) {
+                    console.error('API Error:', error);
+                    return {
+                        response: `Error connecting to the server: ${error.message}. Please check if the orchestrator is running.`,
+                        metadata: {
+                            tools_used: [],
+                            confidence: 0,
+                            validation_status: 'ERROR'
+                        },
+                        error: error.message
+                    };
+                }
+            }
+        }
+
+        // =============================================================================
+        // EVENT HANDLERS
+        // =============================================================================
+        document.getElementById('chatForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Disable input while processing
+            input.disabled = true;
+            sendButton.disabled = true;
+            input.value = '';
+
+            // Add user message
+            addMessage(message, true);
+            conversationHistory.push({ role: 'user', content: message });
+
+            // Show typing indicator
+            addTypingIndicator();
+
+            try {
+                // Send message and get response
+                const result = await sendMessage(message);
+
+                // Remove typing indicator
+                removeTypingIndicator();
+
+                // Add assistant response
+                addMessage(result.response, false, result.metadata);
+                conversationHistory.push({ role: 'assistant', content: result.response });
+
+                // Save to localStorage
+                localStorage.setItem('chatHistory', JSON.stringify(conversationHistory));
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage(`Sorry, an error occurred: ${error.message}`, false);
+            } finally {
+                // Re-enable input
+                input.disabled = false;
+                sendButton.disabled = false;
+                input.focus();
+            }
+        });
+
+        document.getElementById('clearButton').addEventListener('click', clearChat);
+
+        document.getElementById('showJsonButton').addEventListener('click', () => {
+            document.getElementById('jsonRequest').textContent =
+                lastRequest ? JSON.stringify(lastRequest, null, 2) : 'No request yet';
+            document.getElementById('jsonResponse').textContent =
+                lastResponse ? JSON.stringify(lastResponse, null, 2) : 'No response yet';
+            document.getElementById('jsonModal').classList.remove('hidden');
+            document.getElementById('jsonModal').classList.add('flex');
+        });
+
+        document.getElementById('closeJsonModal').addEventListener('click', () => {
+            document.getElementById('jsonModal').classList.add('hidden');
+            document.getElementById('jsonModal').classList.remove('flex');
+        });
+
+        document.getElementById('jsonModal').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) {
+                document.getElementById('jsonModal').classList.add('hidden');
+                document.getElementById('jsonModal').classList.remove('flex');
+            }
+        });
+
+        document.getElementById('mockModeToggle').addEventListener('change', (e) => {
+            isMockMode = e.target.checked;
+            const status = document.getElementById('connectionStatus');
+            if (isMockMode) {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-yellow-400"></span>
+                    <span class="text-gray-600">Mock Mode</span>
+                `;
+            } else {
+                status.innerHTML = `
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="text-gray-600">Live API</span>
+                `;
+            }
+        });
+
+        // Metadata panel toggle
+        document.getElementById('toggleMetadata').addEventListener('click', () => {
+            const content = document.getElementById('metadataContent');
+            const chevron = document.getElementById('metadataChevron');
+            content.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        });
+
+        // =============================================================================
+        // INITIALIZATION
+        // =============================================================================
+        function init() {
+            // Load conversation from localStorage
+            const saved = localStorage.getItem('chatHistory');
+            if (saved) {
+                try {
+                    conversationHistory = JSON.parse(saved);
+                    conversationHistory.forEach(msg => {
+                        addMessage(msg.content, msg.role === 'user');
+                    });
+                } catch (e) {
+                    console.error('Failed to load chat history:', e);
+                }
+            }
+
+            // Focus input
+            document.getElementById('messageInput').focus();
+        }
+
+        init();
+    </script>
+</body>
+</html>
