@@ -46,7 +46,8 @@ When generating SQL:
 - Only generate SELECT queries
 - Always include a LIMIT clause (max 100 for normal queries)
 - Use ILIKE for case-insensitive text matching
-- For status filtering, use WHERE status = 'FOUND' on restaurants table
+- For restaurants table: use WHERE status = 'FOUND' to filter valid restaurants
+- For posts table: use WHERE status = 'active' to filter valid posts
 - Handle NULL values appropriately
 - For hashtag analysis, use: unnest(string_split(hashtags, ' '))
 
