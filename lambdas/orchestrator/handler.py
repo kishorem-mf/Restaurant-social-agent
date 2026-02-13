@@ -92,7 +92,10 @@ def handler(event: dict, context: Any) -> dict:
             return {
                 'statusCode': 400,
                 'headers': {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
+                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
                 },
                 'body': json.dumps({
                     'error': 'Message is required'
@@ -105,7 +108,10 @@ def handler(event: dict, context: Any) -> dict:
         return {
             'statusCode': 200,
             'headers': {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
+                'Access-Control-Allow-Methods': 'POST,OPTIONS'
             },
             'body': json.dumps({
                 'response': response.response,
@@ -119,7 +125,10 @@ def handler(event: dict, context: Any) -> dict:
         return {
             'statusCode': 500,
             'headers': {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
+                'Access-Control-Allow-Methods': 'POST,OPTIONS'
             },
             'body': json.dumps({
                 'error': f"Internal error: {str(e)}",

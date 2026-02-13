@@ -353,6 +353,290 @@ resource "aws_s3_object" "validator_schema" {
 # }
 
 # =============================================================================
+# ORCHESTRATOR LAMBDA (LLM-Driven Routing with Hybrid Approach)
+# =============================================================================
+
+# IAM Role for Orchestrator Lambda
+resource "aws_iam_role" "orchestrator_lambda" {
+  name = "instagram-orchestrator-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "Instagram Orchestrator Lambda Role"
+    Environment = var.environment
+  }
+}
+
+resource "aws_iam_role_policy" "orchestrator_lambda" {
+  name = "instagram-orchestrator-lambda-policy"
+  role = aws_iam_role.orchestrator_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Sid    = "S3AccessForQuery"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.analytics_bucket}",
+          "arn:aws:s3:::${var.analytics_bucket}/*"
+        ]
+      },
+      {
+        Sid    = "BedrockKnowledgeBaseAccess"
+        Effect = "Allow"
+        Action = [
+          "bedrock:Retrieve",
+          "bedrock:RetrieveAndGenerate"
+        ]
+        Resource = "arn:aws:bedrock:${var.aws_region}:${var.aws_account_id}:knowledge-base/${var.knowledge_base_id}"
+      },
+      {
+        Sid    = "BedrockModelAccess"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel"
+        ]
+        Resource = "arn:aws:bedrock:${var.aws_region}::foundation-model/*"
+      },
+      {
+        Sid    = "SecretsManagerAccess"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:azure-openai-credentials-*"
+      },
+      {
+        Sid    = "InvokeLambdaTools"
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = [
+          aws_lambda_function.query_data.arn,
+          aws_lambda_function.response_validator.arn
+        ]
+      }
+    ]
+  })
+}
+
+# Archive the Orchestrator Lambda code
+data "archive_file" "orchestrator_lambda" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../lambdas/orchestrator"
+  output_path = "${path.module}/../../../lambdas/orchestrator.zip"
+  excludes    = ["__pycache__", "*.pyc", "tests", "server.py", ".pytest_cache"]
+}
+
+# Orchestrator Lambda function
+resource "aws_lambda_function" "orchestrator" {
+  function_name = "instagram-orchestrator"
+  role          = aws_iam_role.orchestrator_lambda.arn
+  handler       = "handler.handler"
+  runtime       = "python3.11"
+  timeout       = 300  # 5 minutes for LLM processing
+  memory_size   = 1024 # More memory for LLM orchestration
+
+  filename         = data.archive_file.orchestrator_lambda.output_path
+  source_code_hash = data.archive_file.orchestrator_lambda.output_base64sha256
+
+  layers = [var.duckdb_layer_arn]
+
+  environment {
+    variables = {
+      ANALYTICS_BUCKET             = var.analytics_bucket
+      S3_REGION                    = var.aws_region
+      KNOWLEDGE_BASE_ID            = var.knowledge_base_id
+      AWS_ACCOUNT_ID               = var.aws_account_id
+      QUERY_DATA_LAMBDA            = aws_lambda_function.query_data.function_name
+      RESPONSE_VALIDATOR_LAMBDA    = aws_lambda_function.response_validator.function_name
+      AZURE_OPENAI_SECRET_NAME     = "azure-openai-credentials"
+    }
+  }
+
+  tags = {
+    Name        = "Instagram Orchestrator Lambda"
+    Environment = var.environment
+    Purpose     = "LLM-driven routing with hybrid SQL+semantic search"
+  }
+}
+
+# CloudWatch Log Group for Orchestrator Lambda
+resource "aws_cloudwatch_log_group" "orchestrator_lambda" {
+  name              = "/aws/lambda/${aws_lambda_function.orchestrator.function_name}"
+  retention_in_days = 14
+
+  tags = {
+    Name        = "Instagram Orchestrator Lambda Logs"
+    Environment = var.environment
+  }
+}
+
+# =============================================================================
+# API GATEWAY (REST API for Orchestrator)
+# =============================================================================
+
+resource "aws_api_gateway_rest_api" "orchestrator" {
+  name        = "instagram-analytics-api"
+  description = "API for Instagram Analytics Chat Orchestrator"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = {
+    Name        = "Instagram Analytics API"
+    Environment = var.environment
+  }
+}
+
+# /chat resource
+resource "aws_api_gateway_resource" "chat" {
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+  parent_id   = aws_api_gateway_rest_api.orchestrator.root_resource_id
+  path_part   = "chat"
+}
+
+# POST /chat method
+resource "aws_api_gateway_method" "chat_post" {
+  rest_api_id   = aws_api_gateway_rest_api.orchestrator.id
+  resource_id   = aws_api_gateway_resource.chat.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+# Lambda integration for POST /chat
+resource "aws_api_gateway_integration" "chat_post" {
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_post.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.orchestrator.invoke_arn
+}
+
+# CORS OPTIONS method for /chat
+resource "aws_api_gateway_method" "chat_options" {
+  rest_api_id   = aws_api_gateway_rest_api.orchestrator.id
+  resource_id   = aws_api_gateway_resource.chat.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+
+  type = "MOCK"
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "chat_options" {
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+  resource_id = aws_api_gateway_resource.chat.id
+  http_method = aws_api_gateway_method.chat_options.http_method
+  status_code = aws_api_gateway_method_response.chat_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS,POST,PUT'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# Lambda permission for API Gateway to invoke orchestrator
+resource "aws_lambda_permission" "api_gateway_invoke" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.orchestrator.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.orchestrator.execution_arn}/*/*"
+}
+
+# API Gateway deployment
+resource "aws_api_gateway_deployment" "orchestrator" {
+  depends_on = [
+    aws_api_gateway_integration.chat_post,
+    aws_api_gateway_integration.chat_options
+  ]
+
+  rest_api_id = aws_api_gateway_rest_api.orchestrator.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  # Trigger redeployment when integration changes
+  triggers = {
+    redeployment = sha1(jsonencode([
+      aws_api_gateway_integration.chat_post.id,
+      aws_api_gateway_integration.chat_options.id,
+    ]))
+  }
+}
+
+# API Gateway Stage
+resource "aws_api_gateway_stage" "orchestrator" {
+  deployment_id = aws_api_gateway_deployment.orchestrator.id
+  rest_api_id   = aws_api_gateway_rest_api.orchestrator.id
+  stage_name    = var.environment
+
+  tags = {
+    Name        = "Instagram Analytics API Stage"
+    Environment = var.environment
+  }
+}
+
+# =============================================================================
 # OUTPUTS
 # =============================================================================
 
@@ -364,4 +648,14 @@ output "query_lambda_arn" {
 output "validator_lambda_arn" {
   description = "Validator Lambda ARN"
   value       = aws_lambda_function.response_validator.arn
+}
+
+output "orchestrator_lambda_arn" {
+  description = "Orchestrator Lambda ARN"
+  value       = aws_lambda_function.orchestrator.arn
+}
+
+output "api_gateway_url" {
+  description = "API Gateway endpoint URL for chat"
+  value       = "https://${aws_api_gateway_rest_api.orchestrator.id}.execute-api.${var.aws_region}.amazonaws.com/${aws_api_gateway_stage.orchestrator.stage_name}/chat"
 }

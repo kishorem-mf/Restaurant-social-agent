@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Analytics Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .endpoint-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px;
+            background: #f7f7f7;
+            border-radius: 8px;
+        }
+
+        .endpoint-toggle label {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .endpoint-toggle select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .endpoint-info {
+            font-size: 12px;
+            color: #888;
+            margin-left: 10px;
+        }
+
+        .endpoint-cloud {
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .endpoint-local {
+            color: #2196F3;
+            font-weight: 600;
+        }
+
+        .chat-container {
+            flex: 1;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.assistant .message-avatar {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.assistant .message-content {
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .message-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .message-content th,
+        .message-content td {
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        .message-content th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+
+        .message-content a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .message-content a:hover {
+            text-decoration: underline;
+        }
+
+        .metadata {
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(0,0,0,0.02);
+            border-radius: 6px;
+        }
+
+        .metadata-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e3f2fd;
+            border-radius: 4px;
+            margin-right: 6px;
+            margin-bottom: 4px;
+            color: #1976d2;
+            font-weight: 500;
+        }
+
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #eee;
+            background: white;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #eee;
+            border-radius: 24px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 12px 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .example-queries {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .example-query {
+            padding: 6px 12px;
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 16px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-query:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🍽️ Instagram Analytics Chat</h1>
+        <div class="endpoint-toggle">
+            <label for="endpoint-select">API Endpoint:</label>
+            <select id="endpoint-select">
+                <option value="cloud">☁️ Cloud (AWS Lambda)</option>
+                <option value="local">💻 Local (localhost:8000)</option>
+            </select>
+            <span class="endpoint-info" id="endpoint-info"></span>
+        </div>
+    </div>
+
+    <div class="chat-container">
+        <div class="messages" id="messages">
+            <div class="message assistant">
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    <p>Hello! I'm your Instagram Analytics assistant with hybrid SQL + semantic search powered by AWS Lambda.</p>
+                    <p style="margin-top: 10px;">I can help you with:</p>
+                    <ul style="margin-left: 20px; margin-top: 8px;">
+                        <li>Content-based queries (Italian cuisine, chef posts)</li>
+                        <li>Data analytics (top restaurants, engagement stats)</li>
+                        <li>Hybrid searches (combining SQL rankings with semantic results)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-container">
+            <div class="example-queries">
+                <div class="example-query" onclick="setQuery('top posts on italian cuisine')">Italian cuisine posts</div>
+                <div class="example-query" onclick="setQuery('posts featuring chefs and bloggers')">Chef & blogger posts</div>
+                <div class="example-query" onclick="setQuery('top 10 restaurants by followers')">Top restaurants</div>
+                <div class="example-query" onclick="setQuery('how many restaurants are in the database')">Restaurant count</div>
+            </div>
+            <div class="input-wrapper">
+                <input
+                    type="text"
+                    id="message-input"
+                    placeholder="Ask about restaurants, posts, or search for specific features..."
+                    onkeypress="handleKeyPress(event)"
+                >
+                <button onclick="sendMessage()" id="send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ENDPOINTS = {
+            cloud: 'https://o5ha32swh7.execute-api.us-east-1.amazonaws.com/prod/chat',
+            local: 'http://localhost:8000/chat'
+        };
+
+        let conversationHistory = [];
+        let currentEndpoint = 'cloud';
+
+        function updateEndpointInfo() {
+            const select = document.getElementById('endpoint-select');
+            currentEndpoint = select.value;
+            const infoEl = document.getElementById('endpoint-info');
+            infoEl.textContent = currentEndpoint === 'cloud' ? '✓ AWS Lambda' : '✓ localhost:8000';
+            infoEl.className = 'endpoint-info endpoint-' + currentEndpoint;
+        }
+
+        document.getElementById('endpoint-select').addEventListener('change', updateEndpointInfo);
+        updateEndpointInfo();
+
+        function setQuery(query) {
+            document.getElementById('message-input').value = query;
+            document.getElementById('message-input').focus();
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function addMessage(role, content, metadata = null) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + role;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            const htmlContent = convertMarkdownToHtml(content);
+            contentDiv.innerHTML = htmlContent;
+
+            if (metadata) {
+                const metadataDiv = document.createElement('div');
+                metadataDiv.className = 'metadata';
+
+                let metadataHtml = '';
+                if (metadata.tools_used && metadata.tools_used.length > 0) {
+                    metadataHtml += '<div><strong>Tools:</strong> ';
+                    metadata.tools_used.forEach(tool => {
+                        metadataHtml += '<span class="metadata-badge">' + tool + '</span>';
+                    });
+                    metadataHtml += '</div>';
+                }
+                if (metadata.response_time_ms) {
+                    metadataHtml += '<div><strong>Response time:</strong> ' + (metadata.response_time_ms / 1000).toFixed(2) + 's</div>';
+                }
+                if (metadata.confidence !== undefined) {
+                    metadataHtml += '<div><strong>Confidence:</strong> ' + (metadata.confidence * 100).toFixed(0) + '%</div>';
+                }
+
+                metadataDiv.innerHTML = metadataHtml;
+                contentDiv.appendChild(metadataDiv);
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function convertMarkdownToHtml(markdown) {
+            let html = markdown;
+
+            const tableRegex = /\|(.+)\|\n\|[-:\s|]+\|\n((?:\|.+\|\n?)+)/g;
+            html = html.replace(tableRegex, (match, header, rows) => {
+                const headers = header.split('|').map(h => h.trim()).filter(h => h);
+                const rowData = rows.trim().split('\n').map(row =>
+                    row.split('|').map(cell => cell.trim()).filter(cell => cell)
+                );
+
+                let table = '<table><thead><tr>';
+                headers.forEach(h => table += '<th>' + h + '</th>');
+                table += '</tr></thead><tbody>';
+                rowData.forEach(row => {
+                    table += '<tr>';
+                    row.forEach(cell => table += '<td>' + cell + '</td>');
+                    table += '</tr>';
+                });
+                table += '</tbody></table>';
+                return table;
+            });
+
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\n/g, '<br>');
+
+            return html;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            const sendBtn = document.getElementById('send-btn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="loading"></span>';
+
+            addMessage('user', message);
+            input.value = '';
+
+            conversationHistory.push({ role: 'user', content: message });
+
+            try {
+                const response = await fetch(ENDPOINTS[currentEndpoint], {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        conversation_history: conversationHistory
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    addMessage('assistant', '❌ Error: ' + data.error);
+                } else {
+                    addMessage('assistant', data.response, data.metadata);
+                    conversationHistory.push({ role: 'assistant', content: data.response });
+                }
+            } catch (error) {
+                addMessage('assistant', '❌ Failed to connect to API: ' + error.message + '\n\nPlease check that the ' + (currentEndpoint === 'cloud' ? 'cloud endpoint is accessible' : 'local server is running on port 8000') + '.');
+            }
+
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+        }
+    </script>
+</body>
+</html>

@@ -62,24 +62,6 @@ module "s3" {
   environment = var.environment
 }
 
-# IAM Module - Lambda Execution Role
-module "iam" {
-  source      = "./modules/iam"
-  environment = var.environment
-}
-
-# Lambda Module - Ingest Function and Triggers
-module "lambda" {
-  source           = "./modules/lambda"
-  environment      = var.environment
-  lambda_role_arn  = module.iam.lambda_role_arn
-  duckdb_layer_arn = var.duckdb_layer_arn
-  analytics_bucket = module.s3.analytics_lake_bucket_id
-  aws_region       = var.aws_region
-
-  depends_on = [module.s3, module.iam]
-}
-
 # Bedrock Module - Agent Action Group and KB Data Sources
 module "bedrock" {
   source           = "./modules/bedrock"
@@ -88,31 +70,13 @@ module "bedrock" {
   analytics_bucket = module.s3.analytics_lake_bucket_id
   aws_region       = var.aws_region
 
-  depends_on = [module.s3, module.lambda]
+  depends_on = [module.s3]
 }
 
 # Outputs
 output "analytics_bucket" {
   description = "Analytics lake bucket name"
   value       = module.s3.analytics_lake_bucket_id
-}
-
-output "lambda_function" {
-  description = "Ingest Lambda function name"
-  value       = module.lambda.lambda_function_name
-}
-
-output "lambda_function_arn" {
-  description = "Ingest Lambda function ARN"
-  value       = module.lambda.lambda_function_arn
-}
-
-output "source_buckets" {
-  description = "Source S3 buckets (existing scraper backups)"
-  value = {
-    restaurants = "instagram-scraper-backups-kishore"
-    posts       = "instagram-post-scraper-backups-kishore-us"
-  }
 }
 
 output "query_lambda_arn" {
@@ -123,4 +87,14 @@ output "query_lambda_arn" {
 output "validator_lambda_arn" {
   description = "Response Validator Lambda ARN"
   value       = module.bedrock.validator_lambda_arn
+}
+
+output "orchestrator_lambda_arn" {
+  description = "Orchestrator Lambda ARN"
+  value       = module.bedrock.orchestrator_lambda_arn
+}
+
+output "api_gateway_url" {
+  description = "API Gateway endpoint URL for chat"
+  value       = module.bedrock.api_gateway_url
 }

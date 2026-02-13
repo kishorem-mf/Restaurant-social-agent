@@ -28,6 +28,41 @@ from tools import (
     invoke_response_validator,
 )
 
+
+# Content query detection keywords
+CONTENT_KEYWORDS = {
+    # Cuisine types
+    "italian", "thai", "mexican", "chinese", "japanese", "french", "indian",
+    "vegan", "vegetarian", "gluten-free", "organic", "kosher", "halal",
+    "mediterranean", "asian", "american", "fusion", "seafood", "steakhouse",
+
+    # Content themes
+    "chef", "blogger", "influencer", "creator", "dessert", "brunch", "breakfast",
+    "lunch", "dinner", "healthy", "fine dining", "casual", "upscale",
+
+    # Features
+    "outdoor", "rooftop", "patio", "seating", "atmosphere", "ambiance", "romantic",
+    "private", "dining", "cozy", "modern", "rustic", "elegant", "trendy",
+    "family-friendly", "pet-friendly", "view", "waterfront",
+
+    # Food styles
+    "cuisine", "food", "dishes", "menu", "specialties", "signature",
+}
+
+
+def is_content_based_query(user_query: str) -> bool:
+    """
+    Detect if a user query is content-based (requires semantic search).
+
+    Args:
+        user_query: The user's original question
+
+    Returns:
+        True if query contains content-related keywords
+    """
+    query_lower = user_query.lower()
+    return any(keyword in query_lower for keyword in CONTENT_KEYWORDS)
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -303,14 +338,53 @@ class LLMOrchestrator:
                 query_result = invoke_query_data(sql, user_query=user_message)
 
                 if query_result.success:
+                    # Hybrid approach: Check if we should also run semantic search
+                    is_content_query = is_content_based_query(user_message)
+                    is_sparse = query_result.row_count <= 5
+
+                    logger.info(
+                        f"[HYBRID CHECK] row_count={query_result.row_count}, "
+                        f"is_sparse={is_sparse}, is_content_query={is_content_query}, "
+                        f"user_message='{user_message}'"
+                    )
+
+                    should_add_semantic = is_sparse and is_content_query
+
+                    semantic_results = None
+                    if should_add_semantic:
+                        logger.info(
+                            f"[HYBRID TRIGGER] SQL returned {query_result.row_count} rows "
+                            f"for content query. Adding semantic search results."
+                        )
+                        # Automatically invoke semantic search
+                        semantic_result = invoke_vector_search(user_message, top_k=10)
+                        if semantic_result.success:
+                            semantic_results = semantic_result.results
+                            logger.info(f"[HYBRID SUCCESS] Found {len(semantic_results)} semantic results")
+
+                    # Build combined result
                     result = {
                         "success": True,
-                        "data": query_result.data[:50],  # Limit data in response
+                        "data": query_result.data[:50],
                         "row_count": query_result.row_count,
                         "columns": query_result.columns,
                         "markdown_table": query_result.markdown_table,
                         "allowed_values": query_result.allowed_values,
+                        "result_summary": (
+                            f"SQL query returned {query_result.row_count} results. "
+                            f"Original user query: '{user_message}'"
+                        ),
                     }
+
+                    # Add semantic results if available
+                    if semantic_results:
+                        result["semantic_results"] = semantic_results
+                        result["result_summary"] += (
+                            f"\n\nAdditionally, semantic search found "
+                            f"{len(semantic_results)} relevant items. "
+                            f"Consider combining both SQL and semantic results "
+                            f"for a comprehensive answer."
+                        )
                 else:
                     result = {
                         "success": False,

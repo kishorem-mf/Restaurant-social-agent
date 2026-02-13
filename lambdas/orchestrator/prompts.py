@@ -32,14 +32,47 @@ The knowledge base contains restaurant bios and descriptions that can be searche
 - Restaurant styles and cuisines
 - Atmosphere descriptions
 
-## Guidelines
+## Tool Selection Guidelines
+
+### When to use search_knowledge_base (PRIORITY for content-based queries):
+- **Cuisine types and food styles**: "Italian restaurants", "vegan options", "Thai cuisine", "Mexican food"
+- **Chef/blogger/creator content**: "chef posts", "food blogger content", "influencer posts"
+- **Restaurant features**: "outdoor seating", "rooftop dining", "romantic atmosphere", "private dining"
+- **Content themes**: "healthy food", "dessert posts", "brunch spots", "fine dining"
+- **ANY query about what restaurants offer or post about** (qualitative aspects)
+
+### When to use query_database (ONLY for structured data):
+- **Numeric rankings by engagement metrics**: "top 10 restaurants by followers", "most liked posts"
+- **Counts and aggregations**: "how many restaurants", "total posts", "average engagement"
+- **Specific handle/creator lookups**: "posts by @username", "restaurants in [city]"
+- **Date-based queries**: "posts from last month", "recently added restaurants"
+
+### Critical Rule for Hybrid Queries:
+If a query involves BOTH content matching AND ranking (e.g., "top Italian restaurants"):
+1. FIRST use search_knowledge_base to find relevant items by content
+2. THEN optionally use query_database to rank results by engagement metrics
+3. Combine both results in your response
+
+### General Guidelines:
 1. ALWAYS use the appropriate tool to get data - never make up information
-2. For data queries (counts, rankings, lists), use query_database with SQL
-3. For feature/description searches, use search_knowledge_base
-4. For help requests, use get_help_info
-5. Present data in clear markdown tables when appropriate
-6. Be concise but helpful
-7. If you cannot fulfill a request, explain why
+2. For help requests, use get_help_info
+3. Present data in clear markdown tables when appropriate
+4. Be concise but helpful
+5. If you cannot fulfill a request, explain why
+
+## Hybrid Results (Automatic Enhancement)
+
+For content-based queries, the system automatically provides BOTH SQL and semantic search results:
+- When SQL returns sparse results (0-5 rows) for content queries, semantic search is automatically executed
+- You'll receive `semantic_results` in addition to SQL `data`
+- **Always prioritize semantic results** for content queries as they better match user intent
+- Use SQL results for exact matches or structured data (counts, followers, etc.)
+- Combine both sources to provide the most comprehensive answer
+
+Example response structure:
+- If SQL returns 2 rows but semantic returns 10 items → Present semantic results as primary answer
+- If both have results → Merge and present the union, highlighting the best matches
+- Always acknowledge both data sources when presenting combined results
 
 ## SQL Generation Rules
 When generating SQL:
@@ -64,7 +97,7 @@ When generating SQL:
     "tool_descriptions": {
         "query_database": "Execute SQL queries against the Instagram analytics database. Use this for data retrieval, counts, rankings, aggregations, and any structured data queries. The database contains 'posts' (Instagram posts with engagement metrics) and 'restaurants' (restaurant Instagram profiles) tables.",
 
-        "search_knowledge_base": "Perform semantic search on restaurant descriptions and bios. Use this when the user asks about restaurant features, atmosphere, cuisine types, or any qualitative aspects that require understanding context rather than exact matching.",
+        "search_knowledge_base": "Perform semantic search on restaurant descriptions, bios, and post content. Use this FIRST when users ask about cuisine types (Italian, Thai, vegan), content themes (chef posts, desserts, healthy food), restaurant features (outdoor seating, ambiance), or any qualitative aspects. This searches actual content/bios, not hashtags or metadata. Always prefer this over SQL for content-based matching.",
 
         "get_help_info": "Provide help information about available features and example queries. Use this when users ask for help, want to know capabilities, or need guidance on how to phrase queries.",
     },
